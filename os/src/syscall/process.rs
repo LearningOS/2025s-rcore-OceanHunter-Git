@@ -119,20 +119,16 @@ pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
 // YOUR JOB: Implement mmap.
 pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
     trace!("kernel: sys_mmap");
-    // 检查 start 是否按页对齐
     if start % PAGE_SIZE != 0 {
         return -1;
     }
-    // 检查 prot 的其他位是否为 0
     if port & 0b111 != port || port == 0{
         return -1;
     }
 
-    // 计算需要映射的页数
     let page_count = (len + PAGE_SIZE - 1) / PAGE_SIZE;
     let end = start + page_count * PAGE_SIZE;
 
-    // 获取当前任务的 MemorySet
     let mut inner = TASK_MANAGER.inner.exclusive_access();
     let current_task_id = inner.current_task;
     let memory_set = &mut inner.tasks[current_task_id].memory_set;
@@ -143,13 +139,13 @@ pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
         let area_start_vpn = area.vpn_range.get_start();
         let area_end_vpn = area.vpn_range.get_end();
         if !(end_vpn <= area_start_vpn || start_vpn >= area_end_vpn) {
-            // 存在重叠，即有已经被映射的页
+            // overlap error
             drop(inner);
             return -1;
         }
     }
 
-    // 计算映射权限
+    // add MapPermission
     let mut map_perm = MapPermission::empty();
     if port & 0b001 != 0 {
         map_perm |= MapPermission::R;
@@ -160,9 +156,9 @@ pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
     if port & 0b100 != 0 {
         map_perm |= MapPermission::X;
     }
-    map_perm |= MapPermission::U; // 用户空间映射
+    map_perm |= MapPermission::U;
 
-    // 创建映射区域
+    // create a new area
     let mut map_area = MapArea::new(
         VirtAddr::from(start),
         VirtAddr::from(end),
@@ -170,7 +166,7 @@ pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
         map_perm,
     );
 
-    // 进行映射
+    // map
     for vpn in map_area.vpn_range {
         map_area.map_one(&mut memory_set.page_table, vpn);
     }
@@ -183,20 +179,17 @@ pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
 // YOUR JOB: Implement munmap.
 pub fn sys_munmap(start: usize, len: usize) -> isize {
     trace!("kernel: sys_munmap");
-    // 检查 start 是否按页对齐
     if start % PAGE_SIZE != 0 {
         return -1;
     }
-    // 计算需要取消映射的页数
+
     let page_count = (len + PAGE_SIZE - 1) / PAGE_SIZE;
     let end = start + page_count * PAGE_SIZE;
 
-    // 获取当前任务的 MemorySet
     let mut inner = TASK_MANAGER.inner.exclusive_access();
     let current_task_id = inner.current_task;
     let memory_set = &mut inner.tasks[current_task_id].memory_set;
 
-    // 检查 [start, start + len) 中是否存在未被映射的虚存
     let start_vpn = VirtAddr::from(start).floor();
     let end_vpn = VirtAddr::from(end).ceil();
     let mut found = false;
@@ -204,16 +197,16 @@ pub fn sys_munmap(start: usize, len: usize) -> isize {
         let area_start_vpn = area.vpn_range.get_start();
         let area_end_vpn = area.vpn_range.get_end();
         if area_start_vpn <= start_vpn && area_end_vpn >= end_vpn {
-            // 取消映射
+            // unmap
             for vpn in VPNRange::new(start_vpn, end_vpn) {
                 area.unmap_one(&mut memory_set.page_table, vpn);
             }
             found = true;
             if area_start_vpn == start_vpn && area_end_vpn == end_vpn {
-                // 整个区域都被取消映射，移除该区域
+                // erase areas
                 false
             } else {
-                // 部分区域被取消映射，更新区域范围
+                // update the VPNRange
                 if area_start_vpn == start_vpn {
                     area.vpn_range = VPNRange::new(end_vpn, area_end_vpn);
                 } else if area_end_vpn == end_vpn {

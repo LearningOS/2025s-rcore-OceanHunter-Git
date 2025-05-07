@@ -8,13 +8,21 @@ use bitflags::*;
 bitflags! {
     /// page table entry flags
     pub struct PTEFlags: u8 {
+        /// Valid flag: Indicates whether the page table entry is valid.
         const V = 1 << 0;
+        /// Read flag: Indicates whether the page is readable.
         const R = 1 << 1;
+        /// Write flag: Indicates whether the page is writable.
         const W = 1 << 2;
+        /// Execute flag: Indicates whether the page is executable.
         const X = 1 << 3;
+        /// User flag: Indicates whether the page can be accessed in user mode.
         const U = 1 << 4;
+        /// Global flag: Indicates whether the page is global.
         const G = 1 << 5;
+        /// Accessed flag: Indicates whether the page has been accessed.
         const A = 1 << 6;
+        /// Dirty flag: Indicates whether the page has been modified.
         const D = 1 << 7;
     }
 }

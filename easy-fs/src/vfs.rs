@@ -73,6 +73,62 @@ impl Inode {
             })
         })
     }
+    /// get_inode_id
+    pub fn get_inode_id(&self, name: &str) -> Option<u32> {
+        let _fs = self.fs.lock();
+        self.read_disk_inode(|disk_inode| {
+            self.find_inode_id(name, disk_inode)
+        })
+    }
+    /// linkat 
+    pub fn linkat(&self, name: &str, inode_id: u32){
+        let mut fs = self.fs.lock();
+        self.modify_disk_inode(|root_inode| {
+            // append file in the dirent
+            let file_count = (root_inode.size as usize) / DIRENT_SZ;
+            let new_size = (file_count + 1) * DIRENT_SZ;
+            // increase size
+            self.increase_size(new_size as u32, root_inode, &mut fs);
+            // write dirent
+            let dirent = DirEntry::new(name, inode_id);
+            root_inode.write_at(
+                file_count * DIRENT_SZ,
+                dirent.as_bytes(),
+                &self.block_device,
+            );
+        });
+        
+        let (new_block_id, new_block_offset) = fs.get_disk_inode_pos(inode_id);
+        get_block_cache(new_block_id as usize, Arc::clone(&self.block_device))
+            .lock()
+            .modify(new_block_offset, |disk_inode: &mut DiskInode| {disk_inode.nlink = disk_inode.nlink + 1;});
+        
+    }
+
+    ///
+    pub fn unlinkat(&self, name: &str, inode_id: u32){
+        let fs = self.fs.lock();
+        let (new_block_id, new_block_offset) = fs.get_disk_inode_pos(inode_id);
+        get_block_cache(new_block_id as usize, Arc::clone(&self.block_device))
+            .lock()
+            .modify(new_block_offset, |disk_inode: &mut DiskInode| {disk_inode.nlink = disk_inode.nlink - 1;});
+
+        self.modify_disk_inode(|disk_inode: &mut DiskInode| {
+            let file_count = (disk_inode.size as usize) / DIRENT_SZ;
+            let mut dirent = DirEntry::empty();
+            for i in 0..file_count {
+                assert_eq!(
+                    disk_inode.read_at(DIRENT_SZ * i, dirent.as_bytes_mut(), &self.block_device,),
+                    DIRENT_SZ,
+                );
+                if dirent.name() == name {
+                    disk_inode.write_at(DIRENT_SZ * i, DirEntry::empty().as_bytes(), &self.block_device);
+                }
+            }
+        })
+    }
+
+
     /// Increase the size of a disk inode
     fn increase_size(
         &self,
@@ -182,5 +238,29 @@ impl Inode {
             }
         });
         block_cache_sync_all();
+    }
+
+    /// get_nlink
+    pub fn get_nlink(&self) -> usize{
+        let _fs = self.fs.lock();
+        self.read_disk_inode(|disk_inode| {disk_inode.nlink as usize}) 
+    }
+
+    /// get_mode
+    pub fn get_mode(&self) -> usize{
+        let _fs = self.fs.lock();
+        self.read_disk_inode(|disk_inode| {
+            if disk_inode.is_dir(){
+                return 0;
+            }else{
+                return 1;
+            }
+        }) 
+    }
+
+    /// get_inode
+    pub fn get_inode(&self) -> usize{
+        let _fs = self.fs.lock();
+        (self.block_id * 4) as usize + self.block_offset
     }
 }

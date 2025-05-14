@@ -16,6 +16,7 @@ mod process;
 mod processor;
 mod signal;
 mod switch;
+mod banker;
 #[allow(clippy::module_inception)]
 mod task;
 

@@ -14,6 +14,7 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefMut;
+use super::banker::Banker;
 
 /// Process Control Block
 pub struct ProcessControlBlock {
@@ -49,6 +50,12 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+    /// is_enable
+    pub is_enable: bool,
+    /// mutex banker
+    pub mutex_banker: Banker,
+    /// semaphore banker
+    pub semaphore_banker: Banker,
 }
 
 impl ProcessControlBlockInner {
@@ -119,6 +126,9 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    is_enable: false,
+                    mutex_banker: Banker::new(),
+                    semaphore_banker: Banker::new(),
                 })
             },
         });
@@ -245,6 +255,9 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    is_enable: false,
+                    mutex_banker: Banker::new(),
+                    semaphore_banker: Banker::new(),
                 })
             },
         });

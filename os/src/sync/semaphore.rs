@@ -1,7 +1,7 @@
 //! Semaphore
 
 use crate::sync::UPSafeCell;
-use crate::task::{block_current_and_run_next, current_task, wakeup_task, TaskControlBlock};
+use crate::task::{block_current_and_run_next, current_task, wakeup_task, TaskControlBlock, current_process};
 use alloc::{collections::VecDeque, sync::Arc};
 
 /// semaphore structure
@@ -30,10 +30,17 @@ impl Semaphore {
     }
 
     /// up operation of semaphore
-    pub fn up(&self) {
+    pub fn up(&self, sem_id:usize) {
         trace!("kernel: Semaphore::up");
         let mut inner = self.inner.exclusive_access();
         inner.count += 1;
+
+        let process = current_process();
+        let mut process_inner = process.inner_exclusive_access();
+        let tid = current_task().unwrap().inner_exclusive_access().res.as_ref().unwrap().tid;
+        process_inner.semaphore_banker.add_available(sem_id, 1);
+        process_inner.semaphore_banker.add_allocation(tid, sem_id, -1);
+
         if inner.count <= 0 {
             if let Some(task) = inner.wait_queue.pop_front() {
                 wakeup_task(task);
@@ -42,7 +49,7 @@ impl Semaphore {
     }
 
     /// down operation of semaphore
-    pub fn down(&self) {
+    pub fn down(&self, sem_id:usize) {
         trace!("kernel: Semaphore::down");
         let mut inner = self.inner.exclusive_access();
         inner.count -= 1;
@@ -51,5 +58,12 @@ impl Semaphore {
             drop(inner);
             block_current_and_run_next();
         }
+
+        let process = current_process();
+        let mut process_inner = process.inner_exclusive_access();
+        let tid = current_task().unwrap().inner_exclusive_access().res.as_ref().unwrap().tid;
+        process_inner.semaphore_banker.add_available(sem_id, -1);
+        process_inner.semaphore_banker.add_allocation(tid, sem_id, 1);
+        process_inner.semaphore_banker.add_need(tid, sem_id, -1);
     }
 }

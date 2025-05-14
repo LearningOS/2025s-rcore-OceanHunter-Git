@@ -5,6 +5,7 @@ use crate::task::TaskControlBlock;
 use crate::task::{block_current_and_run_next, suspend_current_and_run_next};
 use crate::task::{current_task, wakeup_task};
 use alloc::{collections::VecDeque, sync::Arc};
+use crate::task::current_process;
 
 /// Mutex trait
 pub trait Mutex: Sync + Send {
@@ -12,6 +13,10 @@ pub trait Mutex: Sync + Send {
     fn lock(&self);
     /// Unlock the mutex
     fn unlock(&self);
+    /// Lock with mutex_id
+    fn lock_with_id(&self, mutex_id:usize);
+    /// Unlock with mutex_id
+    fn unlock_with_id(&self, mutex_id:usize);
 }
 
 /// Spinlock Mutex struct
@@ -45,10 +50,45 @@ impl Mutex for MutexSpin {
         }
     }
 
+    fn lock_with_id(&self, mutex_id:usize) {
+        trace!("kernel: MutexSpin::lock");
+        loop {
+            let mut locked = self.locked.exclusive_access();
+            if *locked {
+                drop(locked);
+                suspend_current_and_run_next();
+                continue;
+            } else {
+                *locked = true;
+                let process = current_process();
+                let mut process_inner = process.inner_exclusive_access();
+                let tid = current_task().unwrap().inner_exclusive_access().res.as_ref().unwrap().tid;
+                process_inner.mutex_banker.add_available(mutex_id, -1);
+                process_inner.mutex_banker.add_allocation(tid, mutex_id, 1);
+                process_inner.mutex_banker.add_need(tid, mutex_id, -1);
+                return;
+            }
+        }
+
+        
+    }
+
     fn unlock(&self) {
         trace!("kernel: MutexSpin::unlock");
         let mut locked = self.locked.exclusive_access();
         *locked = false;
+    }
+
+    fn unlock_with_id(&self, mutex_id:usize) {
+        trace!("kernel: MutexSpin::unlock");
+        let mut locked = self.locked.exclusive_access();
+        *locked = false;
+
+        let process = current_process();
+        let mut process_inner = process.inner_exclusive_access();
+        let tid = current_task().unwrap().inner_exclusive_access().res.as_ref().unwrap().tid;
+        process_inner.mutex_banker.add_available(mutex_id, 1);
+        process_inner.mutex_banker.add_allocation(tid, mutex_id, -1);
     }
 }
 
@@ -91,6 +131,25 @@ impl Mutex for MutexBlocking {
         }
     }
 
+    fn lock_with_id(&self, mutex_id:usize) {
+        trace!("kernel: MutexBlocking::lock");
+        let mut mutex_inner = self.inner.exclusive_access();
+        if mutex_inner.locked {
+            mutex_inner.wait_queue.push_back(current_task().unwrap());
+            drop(mutex_inner);
+            block_current_and_run_next();
+        } else {
+            mutex_inner.locked = true;
+        }
+
+        let process = current_process();
+        let mut process_inner = process.inner_exclusive_access();
+        let tid = current_task().unwrap().inner_exclusive_access().res.as_ref().unwrap().tid;
+        process_inner.mutex_banker.add_available(mutex_id, -1);
+        process_inner.mutex_banker.add_allocation(tid, mutex_id, 1);
+        process_inner.mutex_banker.add_need(tid, mutex_id, -1);
+    }
+
     /// unlock the blocking mutex
     fn unlock(&self) {
         trace!("kernel: MutexBlocking::unlock");
@@ -101,5 +160,22 @@ impl Mutex for MutexBlocking {
         } else {
             mutex_inner.locked = false;
         }
+    }
+
+    fn unlock_with_id(&self, mutex_id:usize) {
+        trace!("kernel: MutexBlocking::unlock");
+        let mut mutex_inner = self.inner.exclusive_access();
+        assert!(mutex_inner.locked);
+        if let Some(waking_task) = mutex_inner.wait_queue.pop_front() {
+            wakeup_task(waking_task);
+        } else {
+            mutex_inner.locked = false;
+        }
+
+        let process = current_process();
+        let mut process_inner = process.inner_exclusive_access();
+        let tid = current_task().unwrap().inner_exclusive_access().res.as_ref().unwrap().tid;
+        process_inner.mutex_banker.add_available(mutex_id, 1);
+        process_inner.mutex_banker.add_allocation(tid, mutex_id, -1);
     }
 }
